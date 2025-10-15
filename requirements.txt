@@ -1,0 +1,47 @@
+# Core Framework
+Flask==3.0.0
+Flask-RESTful==0.3.10
+Flask-CORS==4.0.0
+Flask-Limiter==3.5.0
+gunicorn==21.2.0
+
+# Web Scraping
+scrapy==2.11.0
+playwright==1.40.0
+beautifulsoup4==4.12.2
+lxml==5.1.0
+requests==2.31.0
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.23
+pymongo==4.6.1
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.3
+
+# Task Scheduling
+APScheduler==3.10.4
+
+# Security
+cryptography==41.0.7
+
+# Utilities
+python-dotenv==1.0.0
+pytz==2024.1
+validators==0.22.0
+
+# Monitoring & Logging
+structlog==24.1.0
+
+# Testing (Development)
+pytest==7.4.4
+pytest-cov==4.1.0
+pytest-asyncio==0.23.3
+faker==22.0.0
+
+# Code Quality
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0

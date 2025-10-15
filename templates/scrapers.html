@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Scrapers - PakJobs Aggregator{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <!-- Header -->
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Scraper Control</h1>
+        <p class="text-gray-600">Manage and monitor job scrapers</p>
+    </div>
+
+    <!-- Bulk Actions -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-4">Bulk Actions</h2>
+        <div class="flex gap-4">
+            <button onclick="runAllScrapers('incremental')" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition">
+                Run All Scrapers (Incremental)
+            </button>
+            <button onclick="runAllScrapers('full_refresh')" 
+                    class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition">
+                Full Refresh (All Sites)
+            </button>
+        </div>
+    </div>
+
+    <!-- Scraper Status -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for scraper in scrapers %}
+        <div class="bg-white shadow rounded-lg p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold capitalize">{{ scraper.site_name }}</h3>
+                {% if scraper.status == 'success' %}
+                <span class="px-3 py-1 rounded-full text-sm bg-green-100 text-green-800">
+                    ✓ Success
+                </span>
+                {% elif scraper.status == 'partial' %}
+                <span class="px-3 py-1 rounded-full text-sm bg-yellow-100 text-yellow-800">
+                    ⚠ Partial
+                </span>
+                {% elif scraper.status == 'failed' %}
+                <span class="px-3 py-1 rounded-full text-sm bg-red-100 text-red-800">
+                    ✗ Failed
+                </span>
+                {% else %}
+                <span class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-800">
+                    - Not Run
+                </span>
+                {% endif %}
+            </div>
+
+            <div class="space-y-2 mb-4 text-sm">
+                {% if scraper.start_time %}
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Last Run:</span>
+                    <span class="font-medium">{{ scraper.start_time.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Jobs Found:</span>
+                    <span class="font-medium">{{ scraper.jobs_found or 0 }}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">New Jobs:</span>
+                    <span class="font-medium text-green-600">{{ scraper.jobs_new or 0 }}</span>
+                </div>
+                {% if scraper.duration_seconds %}
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Duration:</span>
+                    <span class="font-medium">{{ scraper.duration_seconds }}s</span>
+                </div>
+                {% endif %}
+                {% else %}
+                <p class="text-gray-500 text-center py-4">Never run</p>
+                {% endif %}
+            </div>
+
+            {% if scraper.error_message %}
+            <div class="bg-red-50 border border-red-200 rounded p-2 mb-4 text-xs text-red-700">
+                {{ scraper.error_message }}
+            </div>
+            {% endif %}
+
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="runScraper('{{ scraper.site_name }}', 'incremental')" 
+                        class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm transition">
+                    Run Incremental
+                </button>
+                <button onclick="runScraper('{{ scraper.site_name }}', 'full_refresh')" 
+                        class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded text-sm transition">
+                    Full Refresh
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Log Output -->
+    <div class="bg-white shadow rounded-lg p-6 mt-6">
+        <h2 class="text-xl font-semibold mb-4">Scraper Log</h2>
+        <div id="scraper-log" class="bg-gray-900 text-green-400 p-4 rounded font-mono text-sm h-64 overflow-y-auto">
+            <p>Ready to run scrapers...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addLog(message) {
+    const log = document.getElementById('scraper-log');
+    const timestamp = new Date().toLocaleTimeString();
+    log.innerHTML += `<p>[${timestamp}] ${message}</p>`;
+    log.scrollTop = log.scrollHeight;
+}
+
+async function runScraper(siteName, mode) {
+    addLog(`Starting ${siteName} scraper in ${mode} mode...`);
+    
+    try {
+        const response = await fetch(`/run-scraper/${siteName}?mode=${mode}`);
+        const result = await response.json();
+        
+        if (result.error) {
+            addLog(`❌ ${siteName} failed: ${result.error}`);
+        } else {
+            addLog(`✅ ${siteName} completed: ${result.jobs_new || 0} new jobs, ${result.jobs_found || 0} found`);
+        }
+        
+        // Reload page after 2 seconds to show updated status
+        setTimeout(() => location.reload(), 2000);
+    } catch (error) {
+        addLog(`❌ Error: ${error.message}`);
+    }
+}
+
+async function runAllScrapers(mode) {
+    addLog(`Starting ALL scrapers in ${mode} mode...`);
+    
+    try {
+        const response = await fetch(`/run-scraper/all?mode=${mode}`);
+        const results = await response.json();
+        
+        for (const [site, result] of Object.entries(results)) {
+            if (result.error) {
+                addLog(`❌ ${site}: ${result.error}`);
+            } else {
+                addLog(`✅ ${site}: ${result.jobs_new || 0} new jobs`);
+            }
+        }
+        
+        addLog('All scrapers completed!');
+        setTimeout(() => location.reload(), 2000);
+    } catch (error) {
+        addLog(`❌ Error: ${error.message}`);
+    }
+}
+</script>
+{% endblock %}

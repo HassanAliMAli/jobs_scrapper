@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PakJobs Aggregator{% endblock %}</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js for analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="gradient-bg text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-2xl font-bold">
+                        🇵🇰 PakJobs Aggregator
+                    </a>
+                </div>
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-purple-700 transition">
+                            Home
+                        </a>
+                        <a href="/jobs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-purple-700 transition">
+                            Jobs
+                        </a>
+                        <a href="/scrapers" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-purple-700 transition">
+                            Scrapers
+                        </a>
+                        <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-purple-700 transition">
+                            Analytics
+                        </a>
+                        <a href="/export?format=csv" class="px-3 py-2 rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 transition">
+                            Export CSV
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white mt-12">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div class="text-center">
+                <p class="text-sm">
+                    &copy; 2025 PakJobs Aggregator | Built with ❤️ for Pakistani job seekers
+                </p>
+                <p class="text-xs mt-2 text-gray-400">
+                    Aggregating from 9 job portals | 100% Free | Open Source
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

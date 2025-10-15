@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Analytics - PakJobs Aggregator{% endblock %}
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">Analytics Dashboard</h1>
+
+    <!-- Salary Statistics -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 class="text-xl font-semibold mb-4">Salary Statistics (PKR)</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="text-center p-4 bg-blue-50 rounded">
+                <p class="text-sm text-gray-600">Average Min</p>
+                <p class="text-2xl font-bold text-blue-600">
+                    {{ "{:,.0f}".format(salary_stats.avg_min) if salary_stats.avg_min else 'N/A' }}
+                </p>
+            </div>
+            <div class="text-center p-4 bg-green-50 rounded">
+                <p class="text-sm text-gray-600">Average Max</p>
+                <p class="text-2xl font-bold text-green-600">
+                    {{ "{:,.0f}".format(salary_stats.avg_max) if salary_stats.avg_max else 'N/A' }}
+                </p>
+            </div>
+            <div class="text-center p-4 bg-purple-50 rounded">
+                <p class="text-sm text-gray-600">Minimum</p>
+                <p class="text-2xl font-bold text-purple-600">
+                    {{ "{:,.0f}".format(salary_stats.min_salary) if salary_stats.min_salary else 'N/A' }}
+                </p>
+            </div>
+            <div class="text-center p-4 bg-orange-50 rounded">
+                <p class="text-sm text-gray-600">Maximum</p>
+                <p class="text-2xl font-bold text-orange-600">
+                    {{ "{:,.0f}".format(salary_stats.max_salary) if salary_stats.max_salary else 'N/A' }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Cities & Companies -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Top Cities</h2>
+            {% for city in top_cities %}
+            <div class="flex justify-between items-center mb-3">
+                <span class="font-medium">{{ city.city }}</span>
+                <span class="text-gray-600">{{ "{:,}".format(city.count) }} jobs</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Top Hiring Companies</h2>
+            {% for company in top_companies %}
+            <div class="flex justify-between items-center mb-3">
+                <span class="font-medium">{{ company.company }}</span>
+                <span class="text-gray-600">{{ company.count }} jobs</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Work Mode Distribution -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Work Mode Distribution</h2>
+        <div class="grid grid-cols-3 gap-4 text-center">
+            <div class="p-4 bg-green-50 rounded">
+                <p class="text-sm text-gray-600">Remote</p>
+                <p class="text-3xl font-bold text-green-600">{{ work_mode.remote_count }}</p>
+            </div>
+            <div class="p-4 bg-yellow-50 rounded">
+                <p class="text-sm text-gray-600">Hybrid</p>
+                <p class="text-3xl font-bold text-yellow-600">{{ work_mode.hybrid_count }}</p>
+            </div>
+            <div class="p-4 bg-blue-50 rounded">
+                <p class="text-sm text-gray-600">Onsite</p>
+                <p class="text-3xl font-bold text-blue-600">{{ work_mode.onsite_count }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
