@@ -1,16 +1,16 @@
 """
-PakJobs Aggregator - Main Flask Application
-Web dashboard, REST API, and scheduler
+Job Scraper - Main Flask Application
 """
 
 import os
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 import pytz
 from dotenv import load_dotenv
 
@@ -22,7 +22,6 @@ from flask_limiter.util import get_remote_address
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from scrapers import SCRAPERS
-from data_pipeline import JobExporter, DatabaseConnector
 
 # Load environment variables
 load_dotenv()
@@ -56,42 +55,129 @@ api = Api(app)
 DATABASE_URL = os.getenv('DATABASE_URL')
 TIMEZONE = pytz.timezone(os.getenv('TIMEZONE', 'Asia/Karachi'))
 
+# Global scraper progress tracker
+scraper_progress = {}
+scraper_lock = threading.Lock()
+scraper_stop_flags = {}  # Stop signals for each scraper
+
+
+def update_scraper_progress(site_name: str, status: str, progress: int, message: str = "", stats: Dict = None):
+    """Update scraper progress for real-time tracking"""
+    with scraper_lock:
+        scraper_progress[site_name] = {
+            'status': status,  # 'running', 'completed', 'failed', 'idle'
+            'progress': progress,  # 0-100
+            'message': message,
+            'stats': stats or {},
+            'updated_at': datetime.now(TIMEZONE).isoformat()
+        }
+
 
 def get_db_connection():
     """Get PostgreSQL database connection"""
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
         return conn
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
         return None
 
 
+def should_stop_scraper(site_name: str) -> bool:
+    """Check if scraper should stop"""
+    with scraper_lock:
+        return scraper_stop_flags.get(site_name, False)
+
+
+def run_scraper_background(site_name: str, mode: str = 'incremental'):
+    """
+    Run scraper in background with progress tracking
+    
+    Args:
+        site_name: Name of the site to scrape
+        mode: 'incremental' or 'full_refresh'
+    """
+    try:
+        # Clear stop flag
+        with scraper_lock:
+            scraper_stop_flags[site_name] = False
+        
+        update_scraper_progress(site_name, 'running', 0, f'Initializing {site_name} scraper...')
+        
+        scraper_class = SCRAPERS.get(site_name)
+        if not scraper_class:
+            update_scraper_progress(site_name, 'failed', 0, f'Unknown scraper: {site_name}')
+            return
+        
+        logger.info(f"Running {site_name} scraper in {mode} mode")
+        update_scraper_progress(site_name, 'running', 10, f'Starting scraper...')
+        
+        scraper = scraper_class()
+        # Pass stop check function to scraper
+        scraper.should_stop = lambda: should_stop_scraper(site_name)
+        
+        # Pass progress callback to scraper
+        def progress_update(message, progress, stats):
+            update_scraper_progress(site_name, 'running', progress or 30, message, stats)
+        
+        scraper.progress_callback = progress_update
+        
+        update_scraper_progress(site_name, 'running', 30, f'Connecting to {site_name}...')
+        
+        stats = scraper.run(mode=mode)
+        
+        # Check if stopped
+        if should_stop_scraper(site_name):
+            update_scraper_progress(site_name, 'stopped', 100, 'Scraping stopped by user!', stats)
+            logger.info(f"{site_name} scraper stopped: {stats}")
+        else:
+            update_scraper_progress(site_name, 'completed', 100, 'Scraping completed!', stats)
+            logger.info(f"{site_name} scraper completed: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Scraper {site_name} failed: {e}", exc_info=True)
+        update_scraper_progress(site_name, 'failed', 0, f'Error: {str(e)}')
+
+
 def run_scraper(site_name: str, mode: str = 'incremental') -> Dict[str, Any]:
     """
-    Run a specific scraper
+    Trigger scraper in background thread
     
     Args:
         site_name: Name of the site to scrape
         mode: 'incremental' or 'full_refresh'
         
     Returns:
-        Scraping statistics
+        Immediate response with task ID
     """
     try:
         scraper_class = SCRAPERS.get(site_name)
         if not scraper_class:
             return {'error': f'Unknown scraper: {site_name}'}
         
-        logger.info(f"Running {site_name} scraper in {mode} mode")
-        scraper = scraper_class()
-        stats = scraper.run(mode=mode)
+        # Check if already running
+        with scraper_lock:
+            current_status = scraper_progress.get(site_name, {}).get('status')
+            if current_status == 'running':
+                return {'error': 'Scraper is already running', 'status': 'running'}
         
-        logger.info(f"{site_name} scraper completed: {stats}")
-        return stats
+        # Start background thread
+        thread = threading.Thread(
+            target=run_scraper_background,
+            args=(site_name, mode),
+            daemon=True
+        )
+        thread.start()
+        
+        return {
+            'success': True,
+            'message': f'{site_name} scraper started in background',
+            'site_name': site_name,
+            'mode': mode
+        }
         
     except Exception as e:
-        logger.error(f"Scraper {site_name} failed: {e}", exc_info=True)
+        logger.error(f"Failed to start scraper {site_name}: {e}", exc_info=True)
         return {'error': str(e)}
 
 
@@ -128,24 +214,24 @@ def index():
         cursor.execute("SELECT COUNT(DISTINCT company) as total FROM jobs WHERE is_active = true")
         total_companies = cursor.fetchone()['total']
         
-        cursor.execute("SELECT COUNT(DISTINCT city) as total FROM jobs WHERE is_active = true AND city IS NOT NULL")
+        cursor.execute("SELECT COUNT(DISTINCT location) as total FROM jobs WHERE is_active = true AND location IS NOT NULL")
         total_cities = cursor.fetchone()['total']
         
         # Recent scrapes
         cursor.execute("""
-            SELECT site_name, status, jobs_new, start_time, duration_seconds
-            FROM scrape_logs
-            ORDER BY start_time DESC
+            SELECT site_name, status, jobs_new, started_at, errors
+            FROM scraping_logs
+            ORDER BY started_at DESC
             LIMIT 10
         """)
         recent_scrapes = cursor.fetchall()
         
         # Jobs by site
         cursor.execute("""
-            SELECT site_source, COUNT(*) as count
+            SELECT source_site, COUNT(*) as count
             FROM jobs
             WHERE is_active = true
-            GROUP BY site_source
+            GROUP BY source_site
             ORDER BY count DESC
         """)
         jobs_by_site = cursor.fetchall()
@@ -197,16 +283,15 @@ def jobs():
             params.append(query)
         
         if city:
-            where_clauses.append("city ILIKE %s")
+            where_clauses.append("location ILIKE %s")
             params.append(f"%{city}%")
         
         if site:
-            where_clauses.append("site_source = %s")
+            where_clauses.append("source_site = %s")
             params.append(site)
         
         if min_salary:
-            where_clauses.append("salary_min >= %s")
-            params.append(min_salary)
+            where_clauses.append("salary IS NOT NULL")
         
         if remote:
             where_clauses.append("is_remote = true")
@@ -219,8 +304,8 @@ def jobs():
         
         # Get jobs
         cursor.execute(f"""
-            SELECT id, title, company, location, city, salary_text, salary_min, salary_max,
-                   job_type, is_remote, posted_date, source_url, site_source
+            SELECT id, title, company, location, salary, job_type, 
+                   experience_level, posted_date, apply_url, source_site
             FROM jobs
             WHERE {where_sql}
             ORDER BY posted_date DESC, scraped_at DESC
@@ -231,10 +316,10 @@ def jobs():
         
         # Get available cities for filter
         cursor.execute("""
-            SELECT DISTINCT city, COUNT(*) as count
+            SELECT DISTINCT location, COUNT(*) as count
             FROM jobs
-            WHERE is_active = true AND city IS NOT NULL
-            GROUP BY city
+            WHERE is_active = true AND location IS NOT NULL
+            GROUP BY location
             ORDER BY count DESC
             LIMIT 20
         """)
@@ -272,10 +357,10 @@ def scrapers():
         scraper_status = []
         for site_name in SCRAPERS.keys():
             cursor.execute("""
-                SELECT site_name, status, jobs_new, jobs_found, start_time, duration_seconds, error_message
-                FROM scrape_logs
+                SELECT site_name, status, jobs_new, jobs_found, started_at, errors, error_message
+                FROM scraping_logs
                 WHERE site_name = %s
-                ORDER BY start_time DESC
+                ORDER BY started_at DESC
                 LIMIT 1
             """, (site_name,))
             
@@ -287,7 +372,10 @@ def scrapers():
                     'site_name': site_name,
                     'status': 'never_run',
                     'jobs_new': 0,
-                    'start_time': None
+                    'jobs_found': 0,
+                    'started_at': None,
+                    'errors': 0,
+                    'error_message': None
                 })
         
         cursor.close()
@@ -310,24 +398,21 @@ def analytics():
     try:
         cursor = conn.cursor()
         
-        # Salary statistics
+        # Salary statistics (salary is text, so just count non-null)
         cursor.execute("""
             SELECT 
-                AVG(salary_min) as avg_min,
-                AVG(salary_max) as avg_max,
-                MIN(salary_min) as min_salary,
-                MAX(salary_max) as max_salary
+                COUNT(*) as jobs_with_salary
             FROM jobs
-            WHERE is_active = true AND salary_min IS NOT NULL
+            WHERE is_active = true AND salary IS NOT NULL
         """)
         salary_stats = cursor.fetchone()
         
         # Top cities
         cursor.execute("""
-            SELECT city, COUNT(*) as count
+            SELECT location, COUNT(*) as count
             FROM jobs
-            WHERE is_active = true AND city IS NOT NULL
-            GROUP BY city
+            WHERE is_active = true AND location IS NOT NULL
+            GROUP BY location
             ORDER BY count DESC
             LIMIT 10
         """)
@@ -380,6 +465,27 @@ def analytics():
         return render_template('error.html', message=str(e)), 500
 
 
+@app.route('/scraper-progress')
+def get_scraper_progress():
+    """Get progress of all scrapers"""
+    with scraper_lock:
+        return jsonify(scraper_progress)
+
+
+@app.route('/scraper-progress/<site_name>')
+def get_scraper_progress_single(site_name):
+    """Get progress of a specific scraper"""
+    with scraper_lock:
+        progress = scraper_progress.get(site_name, {
+            'status': 'idle',
+            'progress': 0,
+            'message': 'Not started',
+            'stats': {},
+            'updated_at': None
+        })
+    return jsonify(progress)
+
+
 @app.route('/run-scraper/<site_name>')
 def run_scraper_route(site_name):
     """Manually trigger a scraper"""
@@ -391,6 +497,27 @@ def run_scraper_route(site_name):
     else:
         result = run_scraper(site_name, mode)
         return jsonify(result)
+
+
+@app.route('/stop-scraper/<site_name>')
+def stop_scraper_route(site_name):
+    """Stop a running scraper"""
+    with scraper_lock:
+        current_status = scraper_progress.get(site_name, {}).get('status')
+        
+        if current_status == 'running':
+            scraper_stop_flags[site_name] = True
+            logger.info(f"Stop signal sent to {site_name} scraper")
+            return jsonify({
+                'success': True,
+                'message': f'Stop signal sent to {site_name} scraper. It will stop after current page.',
+                'site_name': site_name
+            })
+        else:
+            return jsonify({
+                'error': f'Scraper {site_name} is not running',
+                'status': current_status or 'idle'
+            })
 
 
 @app.route('/export')
@@ -523,11 +650,11 @@ class JobSearchAPI(Resource):
                 params.append(query)
             
             if city:
-                where_clauses.append("city ILIKE %s")
+                where_clauses.append("location ILIKE %s")
                 params.append(f"%{city}%")
             
             if site:
-                where_clauses.append("site_source = %s")
+                where_clauses.append("source_site = %s")
                 params.append(site)
             
             where_sql = " AND ".join(where_clauses)
@@ -570,12 +697,12 @@ class StatsAPI(Resource):
             stats['total_companies'] = cursor.fetchone()['total']
             
             cursor.execute("""
-                SELECT site_source, COUNT(*) as count
+                SELECT source_site, COUNT(*) as count
                 FROM jobs
                 WHERE is_active = true
-                GROUP BY site_source
+                GROUP BY source_site
             """)
-            stats['by_site'] = {row['site_source']: row['count'] for row in cursor.fetchall()}
+            stats['by_site'] = {row['source_site']: row['count'] for row in cursor.fetchall()}
             
             cursor.close()
             conn.close()

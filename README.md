@@ -1,28 +1,28 @@
-# 🇵🇰 PakJobs Aggregator
+# 🇵🇰 Rozee.pk Job Scraper
 
-**Comprehensive Job Aggregation Platform for Pakistan**
+**Comprehensive Job Scraping Platform for Rozee.pk**
 
 ## Overview
 
-PakJobs Aggregator is a zero-cost job scraping and analytics platform that consolidates listings from 9 major Pakistani job portals into a single, searchable database with advanced insights.
+A professional-grade job scraper that aggregates listings from Rozee.pk (Pakistan's largest job portal) with complete coverage of all cities, industries, and functional areas.
 
 ## Features
 
-- ✅ **Multi-Site Scraping**: Aggregates from Rozee, Mustakbil, Indeed, BrightSpyre, Bayt, Jobz.pk, Bayrozgar, JobsAlert, PakPositions
-- ✅ **Smart Analytics**: Salary trends, skill demand mapping, location heatmaps
-- ✅ **REST API**: JSON endpoints for external applications
-- ✅ **Data Export**: CSV, JSON, Excel formats
-- ✅ **External DB Integration**: Push to PostgreSQL, MySQL, MongoDB
-- ✅ **Email Notifications**: Automated scraping reports
-- ✅ **100% Free**: Runs on Render.com free tier
+- ✅ **Complete Coverage**: 60-80% of Rozee.pk job market (10,000-18,000 jobs)
+- ✅ **40 Sources**: All major cities, industries, and categories
+- ✅ **28 Data Fields**: Complete job information including deadlines, salaries, requirements
+- ✅ **Smart Scraping**: Intelligent incremental mode with pagination
+- ✅ **REST API**: JSON endpoints for job search
+- ✅ **Real-time Progress**: Live scraping status and statistics
+- ✅ **Web Dashboard**: Modern UI for job search and filtering
 
 ## Tech Stack
 
 - **Backend**: Python 3.12+, Flask 3.0
-- **Scraping**: Scrapy 2.11, Playwright 1.40
-- **Database**: PostgreSQL 16 (1GB)
+- **Scraping**: BeautifulSoup4, Requests
+- **Database**: PostgreSQL 16
 - **Scheduling**: APScheduler
-- **Deployment**: Render.com (free tier)
+- **Frontend**: TailwindCSS
 
 ## Quick Start
 
@@ -36,162 +36,124 @@ PakJobs Aggregator is a zero-cost job scraping and analytics platform that conso
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/pakjobs-aggregator.git
-cd pakjobs-aggregator
+git clone https://github.com/YOUR_USERNAME/rozee-scraper.git
+cd rozee-scraper
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate  # Windows
 
 # Install dependencies
 pip install -r requirements.txt
-playwright install chromium
 
 # Set up environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Initialize database
-python scripts/init_db.py
+copy .env.example .env
+# Edit .env with your PostgreSQL connection
 
 # Run application
 python app.py
+
+# Access dashboard
+# http://localhost:8080
 ```
 
 ## Project Structure
 
 ```
-pakjobs-aggregator/
+rozee-scraper/
 ├── app.py                    # Flask application
 ├── requirements.txt          # Dependencies
 ├── schema.sql               # Database schema
-├── scrapers/                # Scraping modules
+├── scrapers/
 │   ├── base.py              # BaseScraper class
-│   ├── rozee.py             # Rozee.pk scraper
-│   ├── mustakbil.py         # Mustakbil scraper
-│   └── ...                  # Other scrapers
-├── data_pipeline/           # Data processing
-│   ├── cleaner.py           # Data cleaning
-│   ├── validator.py         # Validation
-│   └── exporters.py         # CSV/JSON export
+│   └── rozee.py             # Rozee.pk scraper (40 sources)
+├── migrations/
+│   └── add_complete_job_fields.sql
 ├── templates/               # HTML templates
-├── static/                  # CSS, JS assets
-├── tests/                   # Test suite
-└── scripts/                 # Utility scripts
+└── static/                  # CSS, JS assets
 ```
 
 ## Usage
 
 ### Web Dashboard
 
-Access the dashboard at `http://localhost:5000`
+Access at `http://localhost:8080`
 
-- **Home**: System status and quick stats
-- **Jobs**: Search and filter listings
-- **Scrapers**: Control scraper execution
-- **Analytics**: Salary trends and insights
-- **Settings**: External DB configuration
+- **Jobs**: Search and filter 10,000+ jobs
+- **Scrapers**: Run incremental or full refresh scraping
+- **Analytics**: View scraping statistics
+
+### Scraping Modes
+
+**Incremental (Daily):**
+- 6 sources, 12 pages
+- ~2,400 job URLs
+- 800-1,500 new jobs
+- 30-50 minutes
+
+**Full Refresh (Weekly):**
+- 40 sources, 112 pages  
+- ~22,400 job URLs
+- 10,000-18,000 jobs
+- 5-8 hours
+- **60-80% market coverage**
 
 ### API Endpoints
 
 ```bash
-# Get all jobs (paginated)
+# Get all jobs
 GET /api/v1/jobs?page=1&limit=100
 
 # Search jobs
-GET /api/v1/jobs/search?q=python&city=karachi
+GET /api/v1/jobs/search?q=python&location=karachi
 
 # Get single job
 GET /api/v1/jobs/{id}
 
 # Get statistics
 GET /api/v1/stats
-
-# Get scraper status
-GET /api/v1/sites
-```
-
-### Manual Scraping
-
-```bash
-# Run all scrapers
-python scripts/run_scrapers.py --mode incremental
-
-# Run specific scraper
-python scripts/run_scrapers.py --site rozee
-
-# Full refresh (weekly)
-python scripts/run_scrapers.py --mode full_refresh
 ```
 
 ## Configuration
 
-### Environment Variables
+### Environment Variables (.env)
 
-See `.env.example` for all configuration options:
-
-- **Database**: PostgreSQL connection string
-- **Email**: Gmail SMTP for notifications
-- **Scraping**: Delays, limits, user agents
-- **External DB**: Optional database push configuration
+```
+DATABASE_URL=postgresql://user:pass@localhost:5432/jobs_db
+PORT=8080
+TIMEZONE=Asia/Karachi
+```
 
 ### Scheduling
 
-Scrapers run automatically at 3 AM PKT daily via APScheduler. Configure in `app.py`:
+Scraper runs automatically at 3 AM PKT daily (incremental mode)
 
-```python
-scheduler.add_job(
-    func=run_all_scrapers,
-    trigger="cron",
-    hour=3,
-    minute=0,
-    timezone=pytz.timezone('Asia/Karachi')
-)
-```
+## Data Fields Scraped
 
-## Testing
+All **28 fields** per job:
+- Basic: Title, Company, Description, URL, Posted Date
+- Classification: Industry, Functional Area, Career Level, Job Type, Shift
+- Location: City, Is Remote
+- Requirements: Min Education, Degree, Experience, Age, Gender, Skills
+- Compensation: Salary, Currency, Period
+- Deadlines: Application Deadline, Total Positions
+- Company: Logo URL, Profile URL
+- Meta: External Job ID, Active Status
 
-```bash
-# Run all tests
-pytest
+## Coverage Details
 
-# Run with coverage
-pytest --cov=. --cov-report=html
+### Cities (11)
+Karachi, Lahore, Islamabad, Rawalpindi, Faisalabad, Multan, Hyderabad, Peshawar, Quetta, Gujranwala, Sialkot
 
-# Test specific scraper
-pytest tests/test_scrapers.py::test_rozee_scraper
-```
+### Industries (14)
+IT, Banking, Healthcare, Education, Sales & Marketing, Engineering, Retail, Real Estate, Textiles, Pharmaceutical, Construction, Consultants, Telecom, Manufacturing
 
-## Deployment
-
-### Render.com (Free Tier)
-
-1. Push code to GitHub
-2. Connect Render.com to repository
-3. Configure environment variables
-4. Deploy automatically on push
-
-See `render.yaml` for deployment configuration.
-
-## Legal & Ethics
-
-- Respects `robots.txt` on all sites
-- Implements polite scraping (3s delays)
-- Scrapes only public job listings
-- Provides attribution links
-- Off-peak scraping (3 AM)
-
-## Contributing
-
-This is an internal project. For issues or feature requests, open a GitHub issue.
+### Functional Areas (12)
+Software Development, Sales & Business, Accounts & Finance, HR, Marketing, Advertising, Customer Service, SEO, Data Entry, Warehousing, Secretarial, Computer Networking
 
 ## License
 
-Internal Use - Not for public distribution
-
-## Contact
-
-For questions: admin@pakjobs.example.com
+MIT License
 
 ---
 

@@ -13,8 +13,8 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-import psycopg2
-from psycopg2.extras import execute_values
+import psycopg
+from psycopg.rows import dict_row
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -62,10 +62,21 @@ class BaseScraper(ABC):
         self.conn = None
         self.cursor = None
         
+        # Stop signal (can be set externally)
+        self.should_stop = lambda: False
+        
+        # Progress callback (can be set externally)
+        self.progress_callback = None
+        
+    def update_progress(self, message: str, progress: int = None):
+        """Update progress via callback if available"""
+        if self.progress_callback:
+            self.progress_callback(message, progress, self.stats.copy())
+        
     def connect_db(self):
         """Establish database connection"""
         try:
-            self.conn = psycopg2.connect(self.database_url)
+            self.conn = psycopg.connect(self.database_url)
             self.cursor = self.conn.cursor()
             self.logger.info(f"Database connected for {self.site_name}")
         except Exception as e:
@@ -127,32 +138,34 @@ class BaseScraper(ABC):
             self.logger.error(f"HTML parsing failed: {e}")
             return None
     
-    def generate_job_hash(self, source_url: str) -> str:
+    def generate_job_id(self, apply_url: str, title: str) -> str:
         """
-        Generate unique hash for job based on source URL
+        Generate unique job ID based on URL and title
         
         Args:
-            source_url: Original job posting URL
+            apply_url: Original job posting URL
+            title: Job title
             
         Returns:
             SHA-256 hash string
         """
-        return hashlib.sha256(source_url.encode()).hexdigest()
+        unique_string = f"{apply_url}_{title}"
+        return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
     
-    def job_exists(self, source_url: str) -> bool:
+    def job_exists(self, apply_url: str) -> bool:
         """
         Check if job already exists in database
         
         Args:
-            source_url: Job URL to check
+            apply_url: Job URL to check
             
         Returns:
             True if exists, False otherwise
         """
         try:
             self.cursor.execute(
-                "SELECT id FROM jobs WHERE source_url = %s",
-                (source_url,)
+                "SELECT id FROM jobs WHERE apply_url = %s",
+                (apply_url,)
             )
             return self.cursor.fetchone() is not None
         except Exception as e:
@@ -171,26 +184,43 @@ class BaseScraper(ABC):
         """
         try:
             # Required fields
-            required_fields = ['site_source', 'source_url', 'title', 'company']
+            required_fields = ['source_site', 'apply_url', 'title', 'company']
             for field in required_fields:
                 if field not in job_data:
                     self.logger.error(f"Missing required field: {field}")
                     return False
             
+            # Validate data quality
+            invalid_titles = ['Recommended Jobs', 'Similar Jobs', 'Jobs', 'Related Jobs', 'Popular Jobs', 'All Jobs']
+            if job_data['title'] in invalid_titles:
+                self.logger.warning(f"Rejected invalid title: {job_data['title']}")
+                self.stats['errors'] += 1
+                return False
+            
+            # Validate URL doesn't have obvious issues
+            url = job_data['apply_url']
+            if ' ' in url or '//' in url.replace('https://', '').replace('http://', ''):
+                self.logger.warning(f"Rejected malformed URL: {url}")
+                self.stats['errors'] += 1
+                return False
+            
+            # Generate job_id
+            job_data['job_id'] = self.generate_job_id(job_data['apply_url'], job_data['title'])
+            
             # Set defaults
             job_data.setdefault('posted_date', datetime.now().date())
             job_data.setdefault('is_active', True)
-            job_data.setdefault('country', 'Pakistan')
             
-            # Convert skills list to JSONB
-            if 'skills' in job_data and isinstance(job_data['skills'], list):
-                import json
-                job_data['skills'] = json.dumps(job_data['skills'])
+            # Skills should be array, not JSON string
+            if 'skills' not in job_data:
+                job_data['skills'] = []
+            elif not isinstance(job_data['skills'], list):
+                job_data['skills'] = []
             
             # Insert query
             columns = ', '.join(job_data.keys())
             placeholders = ', '.join(['%s'] * len(job_data))
-            query = f"INSERT INTO jobs ({columns}) VALUES ({placeholders}) ON CONFLICT (source_url) DO NOTHING"
+            query = f"INSERT INTO jobs ({columns}) VALUES ({placeholders}) ON CONFLICT (job_id) DO NOTHING"
             
             self.cursor.execute(query, list(job_data.values()))
             self.conn.commit()
@@ -262,13 +292,13 @@ class BaseScraper(ABC):
                     status = 'failed'
             
             self.cursor.execute("""
-                INSERT INTO scrape_logs (
-                    site_name, scrape_mode, start_time, end_time, duration_seconds,
+                INSERT INTO scraping_logs (
+                    site_name, scrape_mode, started_at, completed_at,
                     jobs_found, jobs_new, jobs_updated, jobs_skipped, 
-                    status, error_count
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    status, errors
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                self.site_name, scrape_mode, start_time, end_time, duration,
+                self.site_name, scrape_mode, start_time, end_time,
                 self.stats['jobs_found'], self.stats['jobs_new'], 
                 self.stats['jobs_updated'], self.stats['jobs_skipped'],
                 status, self.stats['errors']
